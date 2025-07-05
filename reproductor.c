@@ -55,7 +55,7 @@ typedef struct {
     bool premium;
 }Usuario;
 
-    typedef struct {
+typedef struct {
         SDL_Window* window;
         SDL_Renderer* renderer;
 
@@ -65,10 +65,14 @@ typedef struct {
         Button pauseButton;
         Button prevButton;
         Button nextButton;
+
+        SDL_Rect miniMenu;
+
         SDL_Rect backButtonRect;
 
         bool isPlaying;
         bool premium;
+        bool isMiniMenu;
         int cancionesDesdeUltimoAnuncio;
         bool reproduciendoAnuncio;
 
@@ -81,7 +85,7 @@ typedef struct {
 
         
         Fonts fonts;
-
+    
         bool running;
         AppState currentState;
     } App;
@@ -93,14 +97,20 @@ bool loadMedia(App* app);
 Playlist* loadPlaylist(const char* filename);
 bool loadAds(App* app, const char* filename);
 bool loadFonts(App* app);
+
 void playCurrentSong(App* app);
 void setupButtonsForState(App* app);
+
 void render(App* app);
+void renderTextInRect(App* app, const char* text, TTF_Font* font,SDL_Rect rect, SDL_Color textColor, SDL_Color bgColor, bool drawBackground);
+void renderText(App* app, const char* text, TTF_Font* font, int x, int y);
+
 void handleEvents(App* app);
 void cleanup(App* app);
 void updatePlayback(App* app);
 Playlist* loadUserPlaylists(const char* playlistsFile, Usuario* user, const char* basePath);
 void cargarYMostrarPlaylists(App* app, const Usuario* user, const char* basePath);
+
 
 int main(int argc, char* argv[]) {
     App app = {0};
@@ -115,7 +125,7 @@ int main(int argc, char* argv[]) {
     app.cancionesDesdeUltimoAnuncio = 0;
     app.reproduciendoAnuncio = false;
     app.adQueue.front = app.adQueue.rear = NULL;
-
+    app.isMiniMenu=false;
   
 
   
@@ -364,7 +374,7 @@ Playlist* loadPlaylist(const char* filename) {
         if (!node) continue;
 
         strcpy(node->path, line);
-        node->music = Mix_LoadMUS(line);
+        node->music = NULL;
         if (!node->music) {
             free(node);
             continue;
@@ -386,6 +396,8 @@ Playlist* loadPlaylist(const char* filename) {
     return pl;
 }
 
+
+
 bool loadAds(App* app, const char* filename) {
     FILE* f = fopen(filename, "r");
     if (!f) {
@@ -402,12 +414,12 @@ bool loadAds(App* app, const char* filename) {
             return false;
         }
         strcpy(ad->path, line);
-        ad->music = Mix_LoadMUS(line);
-        if (!ad->music) {
-            printf("Error cargando anuncio %s: %s\n", line, Mix_GetError());
-            free(ad);
-            continue;
-        }
+        ad->music = NULL;
+        // if (!ad->music) {
+        //     printf("Error cargando anuncio %s: %s\n", line, Mix_GetError());
+        //     free(ad);
+        //     continue;
+        // }
         ad->next = NULL;
         if (!app->adQueue.front) {
             app->adQueue.front = app->adQueue.rear = ad;
@@ -441,6 +453,44 @@ bool loadFonts(App* app) {
 
     return true;
 }
+void renderTextInRect(App* app, const char* text, TTF_Font* font,
+                      SDL_Rect rect, SDL_Color textColor, SDL_Color bgColor, bool drawBackground) {
+    // 1️⃣ Renderizar texto a superficie
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, textColor);
+    if (!surface) {
+        printf("TTF_RenderUTF8_Blended error: %s\n", TTF_GetError());
+        return;
+    }
+
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(app->renderer, surface);
+    int textW = surface->w;
+    int textH = surface->h;
+    SDL_FreeSurface(surface);
+
+    if (!texture) {
+        printf("SDL_CreateTextureFromSurface error: %s\n", SDL_GetError());
+        return;
+    }
+
+    // 2️⃣ Dibujar rectángulo de fondo si se quiere
+    if (drawBackground) {
+        SDL_SetRenderDrawColor(app->renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
+        SDL_RenderFillRect(app->renderer, &rect);
+    }
+
+    // 3️⃣ Centrar el texto dentro del rectángulo
+    SDL_Rect dstRect;
+    dstRect.w = textW;
+    dstRect.h = textH;
+    dstRect.x = rect.x + (rect.w - textW) / 2;
+    dstRect.y = rect.y + (rect.h - textH) / 2;
+
+    SDL_RenderCopy(app->renderer, texture, NULL, &dstRect);
+
+    SDL_DestroyTexture(texture);
+}
+
+
 void renderText(App* app, const char* text, TTF_Font* font, int x, int y) {
     SDL_Color color = {255, 255, 255, 255};  // blanco, o puedes parametrizar
     SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
@@ -463,34 +513,57 @@ void renderText(App* app, const char* text, TTF_Font* font, int x, int y) {
 
 void playCurrentSong(App* app) {
     if (!app->currentSong) return;
-    // Si no es premium y debe sonar anuncio
+
+    // Si no es premium y toca anuncio
     if (!app->premium && app->cancionesDesdeUltimoAnuncio >= 2 && !app->reproduciendoAnuncio && app->adQueue.front) {
         app->pendingSong = app->currentSong;
+
         AdNode* ad = app->adQueue.front;
 
         Mix_HaltMusic();
+
+        // 👇 Cargar solo ahora
+        ad->music = Mix_LoadMUS(ad->path);
+        if (!ad->music) {
+            printf("Error cargando anuncio %s: %s\n", ad->path, Mix_GetError());
+            return;
+        }
+
         if (Mix_PlayMusic(ad->music, 1) == -1) {
             printf("Error reproduciendo anuncio: %s\n", Mix_GetError());
         } else {
             app->reproduciendoAnuncio = true;
             app->isPlaying = true;
             printf("Reproduciendo anuncio: %s\n", ad->path);
-           
         }
+
         return;
     }
 
-    // Reproducir canción normal
+    // 👇 Cargar canción ahora
     Mix_HaltMusic();
-    if (Mix_PlayMusic(app->currentSong->music, 0) == -1) {
-        printf("Error reproduciendo canción: %s\n", Mix_GetError());
+
+    app->currentSong->music = Mix_LoadMUS(app->currentSong->path);
+    if (!app->currentSong->music) {
+        printf("Error cargando canción: %s\n", Mix_GetError());
         app->isPlaying = false;
         return;
     }
+
+    if (Mix_PlayMusic(app->currentSong->music, 0) == -1) {
+        printf("Error reproduciendo canción: %s\n", Mix_GetError());
+        app->isPlaying = false;
+        Mix_FreeMusic(app->currentSong->music);
+        app->currentSong->music = NULL;
+        return;
+    }
+
     app->isPlaying = true;
     app->reproduciendoAnuncio = false;
+
     printf("Reproduciendo canción: %s\n", app->currentSong->path);
 }
+
 
 void setupButtonsForState(App* app) {
     if (app->currentState == STATE_HOME) {
@@ -498,17 +571,29 @@ void setupButtonsForState(App* app) {
         app->prevButton.rect = (SDL_Rect){ 0, 0, 0, 0 };
         app->nextButton.rect = (SDL_Rect){ 0, 0, 0, 0 };
         app->backButtonRect = (SDL_Rect){ 0, 0, 0, 0 };
+        app->miniMenu = (SDL_Rect) {0,0,0,0};
+
     } else if (app->currentState == STATE_PLAYER) {
         app->playButton.rect = (SDL_Rect){ 481, 520, 80, 80 };
         app->prevButton.rect = (SDL_Rect){ 350, 523, 80, 80 };
         app->nextButton.rect = (SDL_Rect){ 612, 520, 80, 80 };
         app->backButtonRect = (SDL_Rect){ 20, 20, 80, 40 };
+        app->miniMenu = (SDL_Rect) {0,0,0,0};
+        
     }
 }
 
 void render(App* app) {
     SDL_SetRenderDrawColor(app->renderer, 0, 0, 0, 255);
     SDL_RenderClear(app->renderer);
+
+    SDL_Rect rectMusic = {340, 360, 343, 50};  // x, y, w, h
+    SDL_Rect rectNextMusic = {105, 115, 184, 78};  // x, y, w, h
+    SDL_Rect rectPlaylist = {340, 30, 343, 50};  // x, y, w, h
+    SDL_Rect boton3Puntos={900,500,50,50};
+
+    SDL_Color textColor = {255, 255, 255, 255}; // blanco
+    SDL_Color bgColor   = {0, 0, 255, 255};     // azul
 
     switch (app->currentState) {
         case STATE_HOME:
@@ -528,11 +613,17 @@ void render(App* app) {
                 SDL_RenderCopy(app->renderer, app->prevButton.texture, NULL, &app->prevButton.rect);
             if (app->nextButton.rect.w > 0)
                 SDL_RenderCopy(app->renderer, app->nextButton.texture, NULL, &app->nextButton.rect);
-                renderText(app, app->currentPlaylist->name, app->fonts.medium, 280, 20);
+              
                 
-                if(!app->reproduciendoAnuncio)
-                renderText(app, app->currentSong->nombreCancion, app->fonts.small, 100, 150);
-                else renderText(app, app->adQueue.front->path, app->fonts.small, 50, 150);
+            if(!app->reproduciendoAnuncio){ 
+                renderTextInRect(app,app->currentPlaylist->name, app->fonts.medium, rectPlaylist, textColor, bgColor, false);
+
+                renderTextInRect(app,app->currentSong->nombreCancion, app->fonts.medium, rectMusic, textColor, bgColor, false);
+                if(app->currentSong->next!=NULL){
+                    renderTextInRect(app,app->currentSong->next->nombreCancion, app->fonts.small, rectNextMusic, textColor, bgColor, false);
+                }
+            }
+            renderTextInRect(app,"3puntos",app->fonts.small,boton3Puntos,textColor,bgColor,true);
             break;
         default:
             break;
@@ -592,67 +683,107 @@ void handleEvents(App* app) {
                             playCurrentSong(app);
                         }
                     }
+                    else if(SDL_PointInRect(&p, &app->miniMenu)){
+                        app->isMiniMenu=true;
+                        printf("Mini menu activo");
+                    }
+                    else if(!SDL_PointInRect(&p, &app->miniMenu)){
+                        app->isMiniMenu=false;
+                    }
                     break;
             }
         }
     }
 }
+
 void updatePlayback(App* app) {
-    // Si terminó anuncio, pasa a canción
     if (app->reproduciendoAnuncio && !Mix_PlayingMusic()) {
         app->reproduciendoAnuncio = false;
         app->cancionesDesdeUltimoAnuncio = 0;
 
-        // Quitar anuncio de la cola y liberar
         AdNode* ad = app->adQueue.front;
         if (ad) {
             app->adQueue.front = ad->next;
             if (!app->adQueue.front) app->adQueue.rear = NULL;
-            Mix_FreeMusic(ad->music);
+
+            if (ad->music) {
+                Mix_FreeMusic(ad->music);
+                ad->music = NULL;
+            }
             free(ad);
         }
 
-        // Si no quieres volver a la pendiente, avanza a la siguiente:
-        if (app->currentSong && app->currentSong->next) {
-            app->currentSong = app->currentSong->next;
-        } else {
-            app->currentSong = app->currentPlaylist->head;
+        if (app->pendingSong) {
+            app->currentSong = app->pendingSong;
+            app->pendingSong = NULL;
         }
 
         playCurrentSong(app);
+        return;
     }
 
-    // Si canción terminó y no es anuncio
     if (!app->reproduciendoAnuncio && !Mix_PlayingMusic() && app->isPlaying) {
+        // Liberar canción terminada
+        if (app->currentSong && app->currentSong->music) {
+            Mix_FreeMusic(app->currentSong->music);
+            app->currentSong->music = NULL;
+        }
+
         if (app->currentSong && app->currentSong->next) {
             app->currentSong = app->currentSong->next;
             app->cancionesDesdeUltimoAnuncio++;
             playCurrentSong(app);
         } else {
-            app->isPlaying = false;  // Fin de lista
+            app->isPlaying = false;
         }
     }
 }
 
+
 void cleanup(App* app) {
-    // Liberar lista canciones
+    // Liberar lista actual de canciones (compatibilidad)
+
+    SDL_DestroyRenderer(app->renderer);
+    SDL_DestroyWindow(app->window);
     SongNode* s = app->currentSong;
     while (s && s->prev) s = s->prev; // ir al inicio
     while (s) {
         SongNode* next = s->next;
-        Mix_FreeMusic(s->music);
+        // No liberar s->music aquí, ya se liberó después de sonar
         free(s);
         s = next;
     }
 
-    // Liberar anuncios restantes
+    // Liberar todas las playlists
+    Playlist* p = app->playlists;
+    while (p) {
+        SongNode* s = p->head;
+        while (s) {
+            SongNode* next = s->next;
+            free(s);
+            s = next;
+        }
+        Playlist* nextP = p->next;
+        free(p);
+        p = nextP;
+    }
+
+    // Liberar pendingSong si es independiente
+    if (app->pendingSong) {
+        // No liberar music
+        free(app->pendingSong);
+    }
+
+    // Liberar anuncios en cola
     AdNode* a = app->adQueue.front;
     while (a) {
         AdNode* next = a->next;
-        Mix_FreeMusic(a->music);
+        // No liberar music
         free(a);
         a = next;
     }
+
+    
 
     SDL_DestroyTexture(app->playButton.texture);
     SDL_DestroyTexture(app->pauseButton.texture);
@@ -665,8 +796,10 @@ void cleanup(App* app) {
     if (app->fonts.large) TTF_CloseFont(app->fonts.large);
 
     Mix_CloseAudio();
+    TTF_Quit();
+    Mix_Quit();
     IMG_Quit();
-    SDL_DestroyRenderer(app->renderer);
-    SDL_DestroyWindow(app->window);
+
     SDL_Quit();
 }
+
