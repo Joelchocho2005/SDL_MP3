@@ -1,6 +1,7 @@
 
 #include "StateLogin.h" // Incluye la interfaz de funciones y tipos para manejar el sistema de login
 #include <stdio.h> // Necesario para usar printf
+#include "playlist_page.h"
 
 // SDL exige que el punto de entrada se llame SDL_main en algunos entornos (especialmente Windows con SDL2)
 int SDL_main(int argc, char *argv[]) {
