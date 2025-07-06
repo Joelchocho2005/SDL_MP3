@@ -18,6 +18,7 @@ typedef struct {
     const char* duracion;
 } Cancion;
 
+// Variables globales usadas por la vista playlist
 extern SDL_Window*  window;
 extern SDL_Renderer* renderer;
 extern TTF_Font* fontTitulo;
@@ -29,7 +30,7 @@ extern SDL_Texture* albumTexture;
 extern Cancion* canciones; // Lista de canciones que se muestran
 extern int numCanciones; // Número de canciones en la playlist
 
-// Macro para renderizar texto en pantalla con una fuente y color
+// Macro para renderizar texto en pantalla
 #define RENDER_TEXTO(font, txt, x, y, col)                     \
     do {                                                       \
         SDL_Surface* s = TTF_RenderText_Solid(font, txt, col); \
@@ -40,11 +41,12 @@ extern int numCanciones; // Número de canciones en la playlist
     } while(0)
 
 // Inicializa los recursos necesarios de la playlist
-bool inicializarPlaylist();
+bool inicializarPlaylist(SDL_Renderer* ren);
 
-// Renderiza la pantalla de la playlist completa
+// Renderiza la pantalla de la playlist
 void renderizarPlaylist(const char* nombre, const char* autor, const char* nCanciones);
 
 // Libera todos los recursos usados por la playlist
 void destruirPlaylist();
+
 #endif // PLAYLIST_PAGE_H
