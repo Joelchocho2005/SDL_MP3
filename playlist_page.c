@@ -1,5 +1,5 @@
 #include "playlist_page.h"
-#include "reproductor.h"  // Para las funciones de reproducción
+#include "reproductor.h" // Para las funciones de reproducción
 
 static PlaylistPage page;
 
@@ -18,7 +18,7 @@ void initPlaylistPage(SDL_Renderer* renderer, playlist* pl) {
     // Inicializar rectángulos de canciones
     page.totalSongs = 0;
     playlistNodo* actual = pl->canciones;
-    int yPos = 330;  // Posición Y inicial para las canciones
+    int yPos = 330; // Posición Y inicial para las canciones
     
     while(actual != NULL && page.totalSongs < 50) {
         page.songRects[page.totalSongs] = (SDL_Rect){50, yPos, 925, 40};
