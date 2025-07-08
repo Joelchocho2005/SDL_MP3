@@ -5,48 +5,50 @@
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <stdbool.h>
+#include "generalH.h" // Para las estructuras del proyecto principal
 
-// Dimensiones de la interfaz de la playlist
-#define IMG_WIDTH 1026
-#define IMG_HEIGHT 652
+typedef enum {
+    PLAYLIST_STATE_IDLE,
+    PLAYLIST_STATE_PLAYING,
+    PLAYLIST_STATE_HOVER
+} PlaylistState;
 
-// Estructura de una canción
+// Estructura de la página de playlist
 typedef struct {
-    const char* titulo;
-    const char* artista;
-    const char* album;
-    const char* duracion;
-} Cancion;
+    // Recursos gráficos
+    SDL_Texture* background;
+    SDL_Texture* albumCover;
+    
+    // Fuentes
+    TTF_Font* fontTitle; // Título grande (60px)
+    TTF_Font* fontMetadata; // Metadatos (16px)
+    TTF_Font* fontSongs; // Lista de canciones (16px)
+    
+    // Datos dinámicos
+    playlist* currentPlaylist;
+    playlistNodo* currentlyPlaying; // Canción en reproducción
+    SDL_Rect songItems[50]; // Áreas clickeables de canciones
+    int visibleSongCount; // Canciones renderizadas
+    
+    SDL_Rect backButton; // Botón de retroceso
+    PlaylistState state;
+    int hoveredItemIndex; // Índice de canción hover
+    
+    SDL_Color colorNormal;
+    SDL_Color colorHover;
+    SDL_Color colorPlaying;
+} PlaylistPage;
 
-// Variables globales usadas por la vista playlist
-extern SDL_Window*  window;
-extern SDL_Renderer* renderer;
-extern TTF_Font* fontTitulo;
-extern TTF_Font* fontAutor;
-extern TTF_Font* fontNcanciones;
-extern SDL_Texture* backgroundTexture;
-extern SDL_Texture* albumTexture;
+void Playlist_Init(SDL_Renderer* renderer, playlist* pl);
 
-extern Cancion* canciones; // Lista de canciones que se muestran
-extern int numCanciones; // Número de canciones en la playlist
+void Playlist_Render(SDL_Renderer* renderer, playlistNodo* currentSong);
 
-// Macro para renderizar texto en pantalla
-#define RENDER_TEXTO(font, txt, x, y, col)                     \
-    do {                                                       \
-        SDL_Surface* s = TTF_RenderText_Solid(font, txt, col); \
-        SDL_Texture* t = SDL_CreateTextureFromSurface(renderer,s); \
-        SDL_Rect r={x,y,s->w,s->h};                            \
-        SDL_RenderCopy(renderer,t,NULL,&r);                    \
-        SDL_FreeSurface(s); SDL_DestroyTexture(t);             \
-    } while(0)
+playlistNodo* Playlist_HandleEvent(SDL_Event* event, AppState* appState);
 
-// Inicializa los recursos necesarios de la playlist
-bool inicializarPlaylist(SDL_Renderer* ren);
+void Playlist_Destroy();
 
-// Renderiza la pantalla de la playlist
-void renderizarPlaylist(const char* nombre, const char* autor, const char* nCanciones);
+void Playlist_RenderText(SDL_Renderer* renderer, TTF_Font* font, const char* text, int x, int y, SDL_Color color);
 
-// Libera todos los recursos usados por la playlist
-void destruirPlaylist();
+void Playlist_UpdateScroll(int scrollOffset);
 
 #endif // PLAYLIST_PAGE_H
