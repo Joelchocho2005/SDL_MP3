@@ -22,6 +22,13 @@ typedef enum {
     STATE_SEARCH    
 } AppState;
 
+typedef struct ResultadoBusqueda {
+    cancionNodo* cancion;
+    albumLista* album;
+    Artista* artista;
+    struct ResultadoBusqueda* sig;
+} ResultadoBusqueda;
+
 typedef struct {
     SDL_Texture* texture;
     SDL_Rect rect;
@@ -35,6 +42,9 @@ typedef struct playlistNodo {
 
 typedef struct playlist {
     char nombre[longNombres];
+    char ruta[100];
+    int numeroCanciones;
+    int duracionPlaylist;
     struct playlist* sig;
     playlistNodo* canciones;
 } playlist;
@@ -71,7 +81,7 @@ typedef struct {
         SDL_Texture* backHome;
         SDL_Texture *AgregarMusicaAPlaylist;
         SDL_Texture* PageSearch;
-
+        SDL_Texture* canciontexture;
         Button playButton;
         Button pauseButton;
         Button prevButton;
@@ -83,6 +93,7 @@ typedef struct {
         SDL_Rect verArtista;
         SDL_Rect backButtonRect;
         SDL_Rect miniReproductor;
+        SDL_Rect infoCancion;
 
         bool isPlaying;
         bool premium;
@@ -119,13 +130,24 @@ typedef struct {
         int contadorCodAlbumes;
         int contadorCodArtistas;
         
+        //INFORMACION DE MUSICA CUADRO PEQUENIO
+        // En tu struct App:
+        SDL_Texture* tempImage;       // textura temporal para mostrar
+        SDL_Rect tempImageRect;       // dónde dibujar la imagen
+        Uint32 tempImageStartTime;    // momento cuando empezó a mostrarse (SDL_GetTicks)
+        Uint32 tempImageDuration;     // duración en ms que debe mostrarse
+        bool showingTempImage;  
+
         //SOLO PARA PRUEBAS
         UsuarioPrueba userAccount;
 
         //STRUCTURA DE FUENTES PARA LA APP
         //NOTA: AGREGAR SI NECESITAN DE OTRO TAMAÑO
         Fonts fonts;
-    
+        //MOTOR DE BUSQUEDA
+        ResultadoBusqueda* resultados;
+
+
         bool running;
         AppState currentState;
     } App;
@@ -159,6 +181,13 @@ void playCurrentSong(App* app);
 void updatePlayback(App* app);
 //MANEJA LOS CONTROLES DEL REPRODUCTOR
 void handlePlaybackControls(App* app, SDL_Point p);
+
+//FUNCIONES DEL SEARCH
+void handleSearchEvents(App* app, SDL_Event* e);
+
+//FUNCION DE INFORMACION MUSICA
+void startTempImage(App* app, SDL_Texture* image, SDL_Rect rect, Uint32 durationMs);
+
 
 // SETEO DE BOTONES PARA CADA ESTADO
 //NOTA: SI NECESITAN CREAR UN BUTTON HAGANLO CON SU CONFIGURACION EN EL RENDER
@@ -202,7 +231,10 @@ int main(int argc, char* argv[]) {
     if (!initSDL(&app)) return 1;
     if (!loadMedia(&app)) return 1;
     if (!loadFonts(&app)) return 1;
-
+    if (!loadAds(&app, "data/anuncios.txt")) {
+        printf("Error cargando anuncios.\n");
+        return 1;
+    }
     // Playlist* base = loadPlaylist("data/playlistListaUsuarios/canciones.txt");
     
     // if (base) {
@@ -229,15 +261,19 @@ int main(int argc, char* argv[]) {
     printf("\n%s",app.raizArtistas->albumes->canciones->info->nombre);
 
     printf("\n%d",app.contadorCodCanciones);
+    printf("\n%d",app.contadorCodAlbumes);
+    printf("\n%d",app.contadorCodArtistas);
 
     char archivoGeneralPlaylist[100];
     strcpy(archivoGeneralPlaylist,"data/playlistListaUsuarios/");
     strcat(archivoGeneralPlaylist,userAccount.codigoUsuario);
     strcat(archivoGeneralPlaylist,"-ListaPlaylist.csv");
     cargarYMostrarPlaylists(&app, archivoGeneralPlaylist);
-    app.currentPlaylist = app.playlists; 
+    // app.currentPlaylist = app.playlists; 
     // app->currentSong = app->currentPlaylist->canciones;
     setupButtonsForState(&app);
+    
+
 
     while (app.running) {
         handleEvents(&app);
@@ -313,7 +349,7 @@ bool loadMedia(App* app) {
     app->backHome= loadTexture(app,"imgs/Img_HomePage.png");
     app->AgregarMusicaAPlaylist=loadTexture(app,"imgs/AgregarPlaylist.png");
     app->PageSearch=loadTexture(app,"imgs/Img_Search.png");
-
+    app->canciontexture=loadTexture(app,"imgs/Mini_InfoMusica.png");
     if (!app->playButton.texture || !app->pauseButton.texture ||
         !app->prevButton.texture || !app->nextButton.texture) return false;
 
@@ -420,6 +456,9 @@ void renderTextInRect(App* app, const char* text, TTF_Font* font,
 
 void renderText(App* app, const char* text, TTF_Font* font, int x, int y) {
     SDL_Color color = {255, 255, 255, 255};  // blanco, o puedes parametrizar
+    if(app->isMiniMenu){
+        SDL_Color color = {93, 109, 126, 255}; 
+    }
     SDL_Surface* surface = TTF_RenderUTF8_Blended(font, text, color);
     if (!surface) {
         printf("TTF_RenderUTF8_Blended error: %s\n", TTF_GetError());
@@ -496,13 +535,41 @@ playlist* loadPlaylist(char* nombreArchivo, Artista* arbolArtistas) {
         exit(1);
     }
 
-    strcpy(pl->nombre, nombreArchivo);
     pl->canciones = NULL;
+    pl->sig = NULL;
 
+    // Guarda la ruta
+    strcpy(pl->ruta, nombreArchivo);
+
+    // Extrae el nombre de la playlist del nombre del archivo: codUsuario-Nombre.csv
+    const char* nombreBase = strrchr(nombreArchivo, '/');
+    if (nombreBase) nombreBase++; else nombreBase = nombreArchivo;
+
+    const char* guion = strchr(nombreBase, '-');
+    const char* punto = strrchr(nombreBase, '.');
+
+    if (guion && punto && punto > guion) {
+        int len = punto - (guion + 1);
+        strncpy(pl->nombre, guion + 1, len);
+        pl->nombre[len] = '\0';
+    } else {
+        strcpy(pl->nombre, "SinNombre");
+    }
+
+    // Leer cabecera: numeroCanciones;duracionPlaylist
     char linea[longNombres];
+    if (fgets(linea, sizeof(linea), archivo) != NULL) {
+        int numCanciones = 0, duracion = 0;
+        sscanf(linea, "%d;%d", &numCanciones, &duracion);
+        pl->numeroCanciones = numCanciones;
+        pl->duracionPlaylist = duracion;
+    }
+
+    // Leer canciones
     while (fgets(linea, sizeof(linea), archivo) != NULL) {
-        // Elimina salto de línea
-        linea[strcspn(linea, "\n")] = 0;
+        linea[strcspn(linea, "\n")] = 0;  // Elimina salto de línea
+
+        if (strlen(linea) == 0) continue; // Ignora líneas vacías
 
         cancionNodo* encontrada = buscarCancionPorNombre(arbolArtistas, linea);
         if (encontrada != NULL) {
@@ -516,6 +583,7 @@ playlist* loadPlaylist(char* nombreArchivo, Artista* arbolArtistas) {
     fclose(archivo);
     return pl;
 }
+
 
 void loadUserPlaylists(char* nombreArchivo, Artista* arbolArtistas) {
     FILE* archivo = fopen(nombreArchivo, "r");
@@ -564,8 +632,17 @@ void cargarYMostrarPlaylists(App* app, const char* rutaArchivo) {
 
         playlist* nueva = loadPlaylist(rutaCompleta, app->raizArtistas);
         if (nueva) {
-            nueva->sig = app->playlists;
-            app->playlists = nueva;
+            // Insertar al final de la lista ligada app->playlists
+            if (app->playlists == NULL) {
+                app->playlists = nueva;
+            } else {
+                playlist* actual = app->playlists;
+                while (actual->sig != NULL) {
+                    actual = actual->sig;
+                }
+                actual->sig = nueva;
+            }
+
             printf("Playlist cargada: %s\n", nueva->nombre);
 
             if (primera) {
@@ -579,7 +656,6 @@ void cargarYMostrarPlaylists(App* app, const char* rutaArchivo) {
     }
     fclose(archivo);
 }
-
 
 
 void playCurrentSong(App* app) {
@@ -650,6 +726,9 @@ void setupButtonsForState(App* app) {
         app->agregarPlaylist = (SDL_Rect){0, 0, 0, 0};
         app->compartirMusica = (SDL_Rect){0, 0, 0, 0};
         app->searchBoxRect   = (SDL_Rect){0, 0, 0, 0};
+        app->searchActive = false;
+        app->searchColor = (SDL_Color){ 0, 0, 0, 0};
+        app->infoCancion   = (SDL_Rect){0, 0, 0, 0};
 
         switch (app->currentState) {
         case STATE_HOME:
@@ -662,7 +741,7 @@ void setupButtonsForState(App* app) {
             app->searchActive = false;
             strcpy(app->searchText, "");
             app->searchBoxRect = (SDL_Rect) {150, 45, 725, 70} ;  // Usa coordenadas reales
-            app->searchColor = (SDL_Color){ 255, 255, 255, 255};
+            // app->searchColor = (SDL_Color){ 255, 255, 255, 255};
             break;
 
         case STATE_PLAYER:
@@ -675,6 +754,8 @@ void setupButtonsForState(App* app) {
             app->compartirMusica =(SDL_Rect){750,352,225,102};
             app->backButtonRect = (SDL_Rect){30, 10, 40, 40};
             app->searchBoxRect   = (SDL_Rect){150, 45, 725, 70};
+            app->searchColor = (SDL_Color){ 0, 0, 0, 255};
+            app->infoCancion   = (SDL_Rect){750,454,225,102};
             
             break;
         case STATE_AGREGAR_A_PLAYLIST:
@@ -683,9 +764,12 @@ void setupButtonsForState(App* app) {
         break;
         case STATE_SEARCH:
             app->backButtonRect = (SDL_Rect){50, 70, 40, 40};
-            
-        break;
+            app->searchBoxRect   = (SDL_Rect){150, 45, 725, 70};
 
+            SDL_StartTextInput();
+            app->searchActive = true;
+            app->searchText[0] = '\0'; 
+        break;
         default:
             // Opcional: Maneja otros estados si es necesario
             break;
@@ -700,7 +784,7 @@ void render(App* app) {
     SDL_Rect rectNextMusic = {105, 115, 184, 78};  // x, y, w, h
     SDL_Rect rectPlaylist = {340, 30, 343, 50};  // x, y, w, h
     SDL_Rect miniMenu = {750, 250, 225, 308};
-    // SDL_Rect boton3Puntos = {50, 70, 40, 40};
+    // SDL_Rect boton3Puntos = {150, 45, 725, 70};
 
     SDL_Color textColor = {255, 255, 255, 255};
     SDL_Color bgColor = {0, 0, 255, 255};
@@ -778,12 +862,26 @@ void render(App* app) {
                 SDL_RenderCopy(app->renderer, app->miniMenutexture, NULL, &miniMenu);
                 Uint32 now = SDL_GetTicks();
                 if (app->tempMessage && now - app->errorInicios < app->errorFin) {
-                    renderText(app, app->tempMessage, app->fonts.small, 820, 540);
+                        renderText(app, app->tempMessage, app->fonts.small, 820, 540);
+                    } else {
+                        app->tempMessage = NULL;
+                    }
+                }
+           
+            if (app->showingTempImage) {
+                Uint32 now = SDL_GetTicks();
+                if (now - app->tempImageStartTime < app->tempImageDuration) {
+                    SDL_RenderCopy(app->renderer, app->canciontexture, NULL, &app->tempImageRect);
+                    
+                    // printf("%s",app->currentSong->cancion->album->info->nombre);
+                    renderText(app,app->currentSong->cancion->album->punteroArtista->info->nombre,app->fonts.medium,793, 315);
+                    renderText(app,app->currentSong->cancion->album->info->nombre,app->fonts.medium,793, 400);
+                    app->isMiniMenu=false;
+                    
                 } else {
-                    app->tempMessage = NULL;
+                    app->showingTempImage = false;  // termina la muestra
                 }
             }
-
             break;
         case STATE_AGREGAR_A_PLAYLIST:
             SDL_RenderCopy(app->renderer, app->AgregarMusicaAPlaylist, NULL, NULL);
@@ -791,11 +889,23 @@ void render(App* app) {
         break;
         case STATE_SEARCH:
             SDL_RenderCopy(app->renderer, app->PageSearch, NULL, NULL);
-            // renderTextInRect(app,"Hola", app->fonts.medium,
-            //             boton3Puntos,
-            //             textColor,
-            //             bgColor,
-            //             true); 
+                    // Renderizar cuadro de búsqueda (fondo)
+            // SDL_SetRenderDrawColor(app->renderer, 50, 50, 50, 255);  // gris oscuro
+            // SDL_RenderFillRect(app->renderer, &app->searchBoxRect);
+
+            // // Renderizar borde
+            // SDL_SetRenderDrawColor(app->renderer, 255, 255, 255, 255);  // blanco
+            // SDL_RenderDrawRect(app->renderer, &app->searchBoxRect);
+
+            // Renderizar texto actual dentro del rectángulo
+            if (strlen(app->searchText) > 0) {
+                renderTextInRect(app, app->searchText, app->fonts.medium, app->searchBoxRect, app->searchColor, (SDL_Color){0,0,0,255}, false);
+            } 
+                    // renderTextInRect(app,"Hola", app->fonts.medium,
+                    //             boton3Puntos,
+                    //             textColor,
+                    //             bgColor,
+                    //             true); 
         break; 
         default:
             break;
@@ -812,11 +922,19 @@ void handleEvents(App* app) {
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) {
             app->running = false;
-        } else if (e.type == SDL_MOUSEBUTTONDOWN) {
+        } 
+        
+        // ✅ Manejo global de teclado
+        else if (e.type == SDL_TEXTINPUT || e.type == SDL_KEYDOWN) {
+            if (app->currentState == STATE_SEARCH && app->searchActive) {
+                handleSearchEvents(app, &e);
+            }
+        }
+
+        else if (e.type == SDL_MOUSEBUTTONDOWN) {
             int x, y;
             SDL_GetMouseState(&x, &y);
             SDL_Point p = {x, y};
-           
 
             switch (app->currentState) {
                 case STATE_HOME:
@@ -824,6 +942,10 @@ void handleEvents(App* app) {
                         printf("Anuncio en reproducción: controles bloqueados.\n");
                         if(SDL_PointInRect(&p, &app->miniReproductor)&&!SDL_PointInRect(&p, &app->nextButton.rect)&&!SDL_PointInRect(&p, &app->playButton.rect)&&!SDL_PointInRect(&p, &app->prevButton.rect)){
                             app->currentState=STATE_PLAYER;
+                            setupButtonsForState(app);
+                        }
+                         if(SDL_PointInRect(&p, &app->searchBoxRect)){
+                            app->currentState=STATE_SEARCH;
                             setupButtonsForState(app);
                         }
                         break;
@@ -841,16 +963,18 @@ void handleEvents(App* app) {
                     if(SDL_PointInRect(&p, &app->searchBoxRect)){
                         app->currentState=STATE_SEARCH;
                         setupButtonsForState(app);
-
-
                     }
-
+                    
 
                     break;
 
                 case STATE_PLAYER:
                     if (app->reproduciendoAnuncio) {
                         printf("Anuncio en reproducción: controles bloqueados.\n");
+                        if(SDL_PointInRect(&p, &app->backButtonRect)){
+                            app->currentState= STATE_HOME;
+                            setupButtonsForState(app);
+                        }
                         break;
                     }else { 
                         handlePlaybackControls(app, p);
@@ -864,15 +988,24 @@ void handleEvents(App* app) {
                     if(app->isMiniMenu&&SDL_PointInRect(&p,&app->agregarPlaylist)){
                             printf("Agregar a playlisst");
                             app->currentState=STATE_AGREGAR_A_PLAYLIST;
-                        }
+                            app->isMiniMenu=false;
+                    }
                     if(app->isMiniMenu&&SDL_PointInRect(&p,&app->compartirMusica)){
                         showTemporaryMessage(app, "Link copiado", 3000);  // 3 segundos
                           printf("Link copiado");   
+                    }
+                    if(app->isMiniMenu&&SDL_PointInRect(&p,&app->infoCancion)){
+                            printf("INFOCANCION");
+                            app->showingTempImage=true;
+                            // app->isMiniMenu=false;
+                            SDL_Rect rect = {750, 250, 289, 313};  // o el rect que quieras
+                            startTempImage(app, app->canciontexture, rect, 5000); 
                     }
                     else if(!SDL_PointInRect(&p, &app->miniMenu) && !SDL_PointInRect(&p, &miniMenu)){
                         app->isMiniMenu=false;
                         // printf("Min menu desactivado");
                     }
+                    
                     if(SDL_PointInRect(&p, &app->backButtonRect)){
                         app->currentState= STATE_HOME;
                         setupButtonsForState(app);
@@ -886,44 +1019,29 @@ void handleEvents(App* app) {
                     }
                 break;  
                 case STATE_SEARCH:
-                    if(SDL_PointInRect(&p, &app->backButtonRect)){
-                        app->currentState= STATE_HOME;
+                    handleSearchEvents(app, &e);
+
+                    if (SDL_PointInRect(&p, &app->backButtonRect)) {
+                        app->currentState = STATE_HOME;
                         setupButtonsForState(app);
+                    }
+
+                    if (SDL_PointInRect(&p, &app->searchBoxRect)) {
+                        SDL_StartTextInput();
+                        app->searchActive = true;
+                    }
+                    if (!SDL_PointInRect(&p, &app->searchBoxRect)) {
+                        // NO hacer nada que desactive la búsqueda.
+                        // Opcionalmente:
+                        SDL_StopTextInput();
+                        app->searchActive = false;
                     }
                 break; 
             }
         }
     }
 }
-void handleSearchInput(App* app, SDL_Event* e) {
-    if (e->type == SDL_MOUSEBUTTONDOWN) {
-        int x, y;
-        SDL_GetMouseState(&x, &y);
-        SDL_Point p = { x, y };
 
-        if (SDL_PointInRect(&p, &app->searchBoxRect)) {
-            app->searchActive = true;
-            SDL_StartTextInput();
-        } else {
-            app->searchActive = false;
-            SDL_StopTextInput();
-        }
-    }
-    else if (e->type == SDL_TEXTINPUT && app->searchActive) {
-        strcat(app->searchText, e->text.text);
-    }
-    else if (e->type == SDL_KEYDOWN && app->searchActive) {
-        if (e->key.keysym.sym == SDLK_BACKSPACE && strlen(app->searchText) > 0) {
-            app->searchText[strlen(app->searchText) - 1] = '\0';
-        }
-        else if (e->key.keysym.sym == SDLK_RETURN) {
-            printf("Texto ingresado: %s\n", app->searchText);
-            app->searchActive = false;
-            SDL_StopTextInput();
-            // Aquí haces lo que necesites con searchText
-        }
-    }
-}
 
 void handlePlaybackControls(App* app, SDL_Point p) {
     if (SDL_PointInRect(&p, &app->playButton.rect)) {
@@ -953,7 +1071,36 @@ void handlePlaybackControls(App* app, SDL_Point p) {
     }
 }
 
+void handleSearchEvents(App* app, SDL_Event* e) {
+    if (e->type == SDL_TEXTINPUT) {
+        if (strlen(app->searchText) + strlen(e->text.text) < sizeof(app->searchText) - 1) {
+            strcat(app->searchText, e->text.text);
+        }
+    } else if (e->type == SDL_KEYDOWN) {
+        if (e->key.keysym.sym == SDLK_BACKSPACE && strlen(app->searchText) > 0) {
+            app->searchText[strlen(app->searchText) - 1] = '\0';
+        } else if (e->key.keysym.sym == SDLK_RETURN || e->key.keysym.sym == SDLK_KP_ENTER) {
+            printf("Busqueda: %s\n", app->searchText);
+            // app->currentState = STATE_HOME;
+            setupButtonsForState(app);
+            SDL_StopTextInput();
+            app->searchActive = false;
+        } else if (e->key.keysym.sym == SDLK_ESCAPE) {
+            app->currentState = STATE_HOME;
+            setupButtonsForState(app);
+            SDL_StopTextInput();
+            app->searchActive = false;
+        }
+    }
+}
 
+void startTempImage(App* app, SDL_Texture* image, SDL_Rect rect, Uint32 durationMs) {
+    app->tempImage = image;
+    app->tempImageRect = rect;
+    app->tempImageStartTime = SDL_GetTicks();
+    app->tempImageDuration = durationMs;
+    app->showingTempImage = true;
+}
 void updatePlayback(App* app) {
     if (app->reproduciendoAnuncio && !Mix_PlayingMusic()) {
         app->reproduciendoAnuncio = false;
@@ -1092,6 +1239,10 @@ void cleanup(App* app) {
     app->renderer = NULL;
     app->window = NULL;
 
+    if (app->currentMusic) Mix_FreeMusic(app->currentMusic);
+
+    // 2️⃣
+    if (app->searchTexture) SDL_DestroyTexture(app->searchTexture);
     // ---------------------------
     // 9️⃣ Liberar tempMessage si es necesario (solo si fue asignado dinámicamente)
     // ---------------------------
