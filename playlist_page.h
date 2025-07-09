@@ -6,6 +6,15 @@
 #include <SDL2/SDL_ttf.h>
 #include <stdbool.h>
 
+// Estructura para la información de una canción
+typedef struct {
+    int codCancion;
+    char nombre[100];
+    char artista[100];
+    char album[100];
+    char duracion[10];
+} CancionPlaylist;
+
 // Colores
 typedef struct {
     SDL_Color fondo;
@@ -26,8 +35,9 @@ typedef struct {
     // Datos
     const char* playlistName;
     const char* playlistAuthor;
-    int songCount;
-    SDL_Rect* songRects;
+    CancionPlaylist* canciones;
+    int totalCanciones;
+    int capacidad;
     
     // Interacción
     SDL_Rect backButton;
@@ -38,16 +48,19 @@ typedef struct {
 } PlaylistPage;
 
 // Inicialización
-void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author, int totalSongs);
+void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author);
+
+// Agregar canción desde otras páginas
+void Playlist_AgregarCancion(PlaylistPage* page, const char* nombre, const char* artista, 
+                            const char* album, const char* duracion);
 
 // Renderizado
-void Playlist_Render(SDL_Renderer* renderer, const char** titles, const char** artists, 
-                    const char** albums, const char** durations);
+void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page);
 
 // Eventos
-void Playlist_HandleEvent(SDL_Event* event, bool* running);
+void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page);
 
 // Limpieza
-void Playlist_Destroy();
+void Playlist_Destroy(PlaylistPage* page);
 
 #endif
