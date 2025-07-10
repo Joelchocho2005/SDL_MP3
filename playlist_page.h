@@ -7,7 +7,6 @@
 #include <stdbool.h>
 #include "../Artistas_Canciones/artistas_canciones.h"
 
-// Estructura de colores
 typedef struct {
     SDL_Color fondo;
     SDL_Color blanco;
@@ -16,9 +15,8 @@ typedef struct {
     SDL_Color hover;
 } PlaylistColors;
 
-// Estructura principal de la playlist
 typedef struct {
-    // Recursos gráficos
+    // Recursos
     SDL_Texture* background;
     SDL_Texture* albumCover;
     TTF_Font* fontTitle;
@@ -34,12 +32,15 @@ typedef struct {
     // Interacción
     SDL_Rect backButton;
     SDL_Rect nextButton;
+    SDL_Rect prevButton;
     bool showNextButton;
+    bool showPrevButton;
     int hoveredItem;
+    int paginaActual;
     PlaylistColors colors;
 } PlaylistPage;
 
-// Funciones principales
+// Funciones
 void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author);
 void Playlist_AgregarCancion(PlaylistPage* page, const cancionInfo* cancion);
 void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page);
