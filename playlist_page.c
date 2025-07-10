@@ -41,6 +41,8 @@ void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author)
     // Botones
     page.backButton = (SDL_Rect){30, 10, 40, 40};
     page.showNextButton = false;
+    page.showPrevButton = false;
+    page.paginaActual = 0;
 }
 
 // Agrega una canción desde otras ventanas
@@ -51,10 +53,8 @@ void Playlist_AgregarCancion(PlaylistPage* page, const cancionInfo* cancion) {
     }
     page->canciones[page->totalCanciones] = *cancion;
     page->totalCanciones++;
-    page->showNextButton = (page->totalCanciones > 5);
-    if (page->showNextButton) {
-        page->nextButton = (SDL_Rect){50 + 925 - 150, 330 + (5 * 45) + 10, 150, 30};
-    }
+    page->showNextButton = (page->totalCanciones > (page->paginaActual + 1) * 5);
+    page->showPrevButton = (page->paginaActual > 0);
 }
 
 // Renderiza la playlist con todos los campos
@@ -74,18 +74,20 @@ void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page) {
     SDL_Rect titleRect = {307, 80, titleSurf->w, titleSurf->h};
     SDL_RenderCopy(renderer, titleTex, NULL, &titleRect);
 
-    // Renderizar canciones
-    int renderCount = page->showNextButton ? 5 : page->totalCanciones;
-    for (int i = 0; i < renderCount; i++) {
-        SDL_Color bgColor = (i == page->hoveredItem) ? page->colors[4] : page->colors[2];
-        SDL_Color textColor = (i == page->hoveredItem) ? page->colors[1] : page->colors[3];
+    // Calcular rango de canciones a mostrar (5 por página)
+    int inicio = page->paginaActual * 5;
+    int fin = inicio + 5;
+    if (fin > page->totalCanciones) fin = page->totalCanciones;
 
-        // Fondo del ítem de canción
-        SDL_Rect songRect = {50, 330 + (i * 45), 925, 40};
+    for (int i = inicio; i < fin; i++) {
+        int pos = i - inicio;
+        SDL_Color bgColor = (pos == page->hoveredItem) ? page->colors[4] : page->colors[2];
+        SDL_Color textColor = (pos == page->hoveredItem) ? page->colors[1] : page->colors[3];
+
+        SDL_Rect songRect = {50, 330 + (pos * 45), 925, 40};
         SDL_SetRenderDrawColor(renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
         SDL_RenderFillRect(renderer, &songRect);
 
-        // Renderizar todos los campos
         char indexStr[4];
         snprintf(indexStr, sizeof(indexStr), "%d", i + 1);
         renderizarTexto(page->fontDetails, indexStr, songRect.x + 30, songRect.y + 10, textColor);
@@ -95,30 +97,42 @@ void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page) {
         renderizarTexto(page->fontDetails, page->canciones[i].duracion, songRect.x + 830, songRect.y + 10, textColor);
     }
 
+    // Botón Atrás
+    if (page->showPrevButton) {
+        page->prevButton = (SDL_Rect){50, 330 + (5 * 45) + 10, 150, 30};
+        SDL_SetRenderDrawColor(renderer, page->colors[4].r, page->colors[4].g, page->colors[4].b, page->colors[4].a);
+        SDL_RenderFillRect(renderer, &page->prevButton);
+        renderizarTexto(page->fontDetails, "Atrás", page->prevButton.x + 10, page->prevButton.y + 5, page->colors[1]);
+    }
+
     // Botón Siguiente
     if (page->showNextButton) {
+        page->nextButton = (SDL_Rect){50 + 925 - 150, 330 + (5 * 45) + 10, 150, 30};
         SDL_SetRenderDrawColor(renderer, page->colors[4].r, page->colors[4].g, page->colors[4].b, page->colors[4].a);
         SDL_RenderFillRect(renderer, &page->nextButton);
         renderizarTexto(page->fontDetails, "Siguiente", page->nextButton.x + 10, page->nextButton.y + 5, page->colors[1]);
     }
 
-    // Limpieza
     SDL_FreeSurface(titleSurf);
     SDL_DestroyTexture(titleTex);
 }
 
-// Maneja eventos como clic, hover
+// Manejo de eventos clic y hover
 void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page) {
     if (event->type == SDL_MOUSEMOTION) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
         page->hoveredItem = -1;
 
-        int checkCount = page->showNextButton ? 5 : page->totalCanciones;
-        for (int i = 0; i < checkCount; i++) {
-            SDL_Rect songRect = {50, 330 + (i * 45), 925, 40};
+        int inicio = page->paginaActual * 5;
+        int fin = inicio + 5;
+        if (fin > page->totalCanciones) fin = page->totalCanciones;
+
+        for (int i = inicio; i < fin; i++) {
+            int pos = i - inicio;
+            SDL_Rect songRect = {50, 330 + (pos * 45), 925, 40};
             if (SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &songRect)) {
-                page->hoveredItem = i;
+                page->hoveredItem = pos;
                 break;
             }
         }
@@ -127,11 +141,18 @@ void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
 
-        if (SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->backButton)) {
-            printf("Click en atrás\n");
+        if (page->showPrevButton && SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->prevButton)) {
+            page->paginaActual--;
+            page->showNextButton = (page->totalCanciones > (page->paginaActual + 1) * 5);
+            page->showPrevButton = (page->paginaActual > 0);
         }
         else if (page->showNextButton && SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->nextButton)) {
-            printf("Click en siguiente\n");
+            page->paginaActual++;
+            page->showNextButton = (page->totalCanciones > (page->paginaActual + 1) * 5);
+            page->showPrevButton = true;
+        }
+        else if (SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->backButton)) {
+            printf("Click en atrás\n");
         }
     }
     else if (event->type == SDL_QUIT) {
