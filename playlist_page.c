@@ -6,23 +6,30 @@
 static PlaylistPage page;
 
 // Función auxiliar para renderizar texto
-void renderizarTexto(TTF_Font* fuente, const char* texto, int x, int y, SDL_Color color) {
+static void renderizarTexto(SDL_Renderer* renderer, TTF_Font* fuente, const char* texto, int x, int y, SDL_Color color) {
     SDL_Surface* surface = TTF_RenderText_Solid(fuente, texto, color);
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(SDL_GetRenderer(SDL_GetWindowFromID(1)), surface);
+    if (!surface) return;
+    
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (!texture) {
+        SDL_FreeSurface(surface);
+        return;
+    }
+
     SDL_Rect rect = {x, y, surface->w, surface->h};
-    SDL_RenderCopy(SDL_GetRenderer(SDL_GetWindowFromID(1)), texture, NULL, &rect);
+    SDL_RenderCopy(renderer, texture, NULL, &rect);
+    
     SDL_FreeSurface(surface);
     SDL_DestroyTexture(texture);
 }
 
-// Inicializa la playlist
 void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author) {
     // Configuración de colores
-    page.colors[0] = (SDL_Color){64, 65, 68, 255}; // Fondo
-    page.colors[1] = (SDL_Color){255, 255, 255, 255}; // Blanco
-    page.colors[2] = (SDL_Color){200, 200, 200, 255}; // Gris
-    page.colors[3] = (SDL_Color){20, 20, 20, 255}; // Texto
-    page.colors[4] = (SDL_Color){58, 58, 59, 255}; // Hover
+    page.colors.fondo = (SDL_Color){64, 65, 68, 255};
+    page.colors.blanco = (SDL_Color){255, 255, 255, 255};
+    page.colors.gris = (SDL_Color){200, 200, 200, 255};
+    page.colors.texto = (SDL_Color){20, 20, 20, 255};
+    page.colors.hover = (SDL_Color){58, 58, 59, 255};
 
     // Carga de recursos
     page.background = IMG_LoadTexture(renderer, "imgs/Playlist_page.png");
@@ -41,11 +48,8 @@ void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author)
     // Botones
     page.backButton = (SDL_Rect){30, 10, 40, 40};
     page.showNextButton = false;
-    page.showPrevButton = false;
-    page.paginaActual = 0;
 }
 
-// Agrega una canción desde otras ventanas
 void Playlist_AgregarCancion(PlaylistPage* page, const cancionInfo* cancion) {
     if (page->totalCanciones >= page->capacidad) {
         page->capacidad *= 2;
@@ -53,14 +57,19 @@ void Playlist_AgregarCancion(PlaylistPage* page, const cancionInfo* cancion) {
     }
     page->canciones[page->totalCanciones] = *cancion;
     page->totalCanciones++;
-    page->showNextButton = (page->totalCanciones > (page->paginaActual + 1) * 5);
-    page->showPrevButton = (page->paginaActual > 0);
+    page->showNextButton = (page->totalCanciones > 5);
+    if (page->showNextButton) {
+        page->nextButton = (SDL_Rect){50 + 925 - 150, 330 + (5 * 45) + 10, 150, 30};
+    }
 }
 
-// Renderiza la playlist con todos los campos
 void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page) {
     // Fondo
-    SDL_SetRenderDrawColor(renderer, page->colors[0].r, page->colors[0].g, page->colors[0].b, page->colors[0].a);
+    SDL_SetRenderDrawColor(renderer, 
+                          page->colors.fondo.r, 
+                          page->colors.fondo.g, 
+                          page->colors.fondo.b, 
+                          page->colors.fondo.a);
     SDL_RenderClear(renderer);
     SDL_RenderCopy(renderer, page->background, NULL, NULL);
 
@@ -69,70 +78,63 @@ void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page) {
     SDL_RenderCopy(renderer, page->albumCover, NULL, &coverRect);
 
     // Título de la playlist
-    SDL_Surface* titleSurf = TTF_RenderText_Solid(page->fontTitle, page->playlistName, page->colors[1]);
-    SDL_Texture* titleTex = SDL_CreateTextureFromSurface(renderer, titleSurf);
-    SDL_Rect titleRect = {307, 80, titleSurf->w, titleSurf->h};
-    SDL_RenderCopy(renderer, titleTex, NULL, &titleRect);
+    SDL_Surface* titleSurf = TTF_RenderText_Solid(page->fontTitle, page->playlistName, page->colors.blanco);
+    if (titleSurf) {
+        SDL_Texture* titleTex = SDL_CreateTextureFromSurface(renderer, titleSurf);
+        if (titleTex) {
+            SDL_Rect titleRect = {307, 80, titleSurf->w, titleSurf->h};
+            SDL_RenderCopy(renderer, titleTex, NULL, &titleRect);
+            SDL_DestroyTexture(titleTex);
+        }
+        SDL_FreeSurface(titleSurf);
+    }
 
-    // Calcular rango de canciones a mostrar (5 por página)
-    int inicio = page->paginaActual * 5;
-    int fin = inicio + 5;
-    if (fin > page->totalCanciones) fin = page->totalCanciones;
+    // Renderizar canciones
+    int renderCount = page->showNextButton ? 5 : page->totalCanciones;
+    for (int i = 0; i < renderCount; i++) {
+        SDL_Color bgColor = (i == page->hoveredItem) ? page->colors.hover : page->colors.gris;
+        SDL_Color textColor = (i == page->hoveredItem) ? page->colors.blanco : page->colors.texto;
 
-    for (int i = inicio; i < fin; i++) {
-        int pos = i - inicio;
-        SDL_Color bgColor = (pos == page->hoveredItem) ? page->colors[4] : page->colors[2];
-        SDL_Color textColor = (pos == page->hoveredItem) ? page->colors[1] : page->colors[3];
-
-        SDL_Rect songRect = {50, 330 + (pos * 45), 925, 40};
+        SDL_Rect songRect = {50, 330 + (i * 45), 925, 40};
         SDL_SetRenderDrawColor(renderer, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
         SDL_RenderFillRect(renderer, &songRect);
 
         char indexStr[4];
         snprintf(indexStr, sizeof(indexStr), "%d", i + 1);
-        renderizarTexto(page->fontDetails, indexStr, songRect.x + 30, songRect.y + 10, textColor);
-        renderizarTexto(page->fontDetails, page->canciones[i].nombre, songRect.x + 70, songRect.y + 10, textColor);
-        renderizarTexto(page->fontDetails, page->canciones[i].artista, songRect.x + 320, songRect.y + 10, textColor);
-        renderizarTexto(page->fontDetails, page->canciones[i].album, songRect.x + 560, songRect.y + 10, textColor);
-        renderizarTexto(page->fontDetails, page->canciones[i].duracion, songRect.x + 830, songRect.y + 10, textColor);
+        
+        // Renderizar todos los campos
+        renderizarTexto(renderer, page->fontDetails, indexStr, songRect.x + 30, songRect.y + 10, textColor);
+        renderizarTexto(renderer, page->fontDetails, page->canciones[i].nombre, songRect.x + 70, songRect.y + 10, textColor);
+        renderizarTexto(renderer, page->fontDetails, page->canciones[i].artista, songRect.x + 320, songRect.y + 10, textColor);
+        renderizarTexto(renderer, page->fontDetails, page->canciones[i].album, songRect.x + 560, songRect.y + 10, textColor);
+        renderizarTexto(renderer, page->fontDetails, page->canciones[i].duracion, songRect.x + 830, songRect.y + 10, textColor);
     }
 
-    // Botón Atrás
-    if (page->showPrevButton) {
-        page->prevButton = (SDL_Rect){50, 330 + (5 * 45) + 10, 150, 30};
-        SDL_SetRenderDrawColor(renderer, page->colors[4].r, page->colors[4].g, page->colors[4].b, page->colors[4].a);
-        SDL_RenderFillRect(renderer, &page->prevButton);
-        renderizarTexto(page->fontDetails, "Atrás", page->prevButton.x + 10, page->prevButton.y + 5, page->colors[1]);
-    }
-
-    // Botón Siguiente
+    // Botón "Siguiente"
     if (page->showNextButton) {
-        page->nextButton = (SDL_Rect){50 + 925 - 150, 330 + (5 * 45) + 10, 150, 30};
-        SDL_SetRenderDrawColor(renderer, page->colors[4].r, page->colors[4].g, page->colors[4].b, page->colors[4].a);
+        SDL_SetRenderDrawColor(renderer, 
+                              page->colors.hover.r, 
+                              page->colors.hover.g, 
+                              page->colors.hover.b, 
+                              page->colors.hover.a);
         SDL_RenderFillRect(renderer, &page->nextButton);
-        renderizarTexto(page->fontDetails, "Siguiente", page->nextButton.x + 10, page->nextButton.y + 5, page->colors[1]);
+        renderizarTexto(renderer, page->fontDetails, "Siguiente", 
+                       page->nextButton.x + 10, page->nextButton.y + 5, 
+                       page->colors.blanco);
     }
-
-    SDL_FreeSurface(titleSurf);
-    SDL_DestroyTexture(titleTex);
 }
 
-// Manejo de eventos clic y hover
 void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page) {
     if (event->type == SDL_MOUSEMOTION) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
         page->hoveredItem = -1;
 
-        int inicio = page->paginaActual * 5;
-        int fin = inicio + 5;
-        if (fin > page->totalCanciones) fin = page->totalCanciones;
-
-        for (int i = inicio; i < fin; i++) {
-            int pos = i - inicio;
-            SDL_Rect songRect = {50, 330 + (pos * 45), 925, 40};
+        int checkCount = page->showNextButton ? 5 : page->totalCanciones;
+        for (int i = 0; i < checkCount; i++) {
+            SDL_Rect songRect = {50, 330 + (i * 45), 925, 40};
             if (SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &songRect)) {
-                page->hoveredItem = pos;
+                page->hoveredItem = i;
                 break;
             }
         }
@@ -141,18 +143,11 @@ void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page) {
         int mouseX, mouseY;
         SDL_GetMouseState(&mouseX, &mouseY);
 
-        if (page->showPrevButton && SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->prevButton)) {
-            page->paginaActual--;
-            page->showNextButton = (page->totalCanciones > (page->paginaActual + 1) * 5);
-            page->showPrevButton = (page->paginaActual > 0);
+        if (SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->backButton)) {
+            printf("Click en atrás\n");
         }
         else if (page->showNextButton && SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->nextButton)) {
-            page->paginaActual++;
-            page->showNextButton = (page->totalCanciones > (page->paginaActual + 1) * 5);
-            page->showPrevButton = true;
-        }
-        else if (SDL_PointInRect(&(SDL_Point){mouseX, mouseY}, &page->backButton)) {
-            printf("Click en atrás\n");
+            printf("Click en siguiente\n");
         }
     }
     else if (event->type == SDL_QUIT) {
@@ -160,7 +155,6 @@ void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page) {
     }
 }
 
-// Libera recursos
 void Playlist_Destroy(PlaylistPage* page) {
     if (page->background) SDL_DestroyTexture(page->background);
     if (page->albumCover) SDL_DestroyTexture(page->albumCover);
