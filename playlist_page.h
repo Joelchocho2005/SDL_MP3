@@ -5,17 +5,9 @@
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <stdbool.h>
+#include "../Artistas_Canciones/artistas_canciones.h"
 
-// Estructura para la información de una canción
-typedef struct {
-    int codCancion;
-    char nombre[100];
-    char artista[100];
-    char album[100];
-    char duracion[10];
-} CancionPlaylist;
-
-// Colores
+// Estructura de colores
 typedef struct {
     SDL_Color fondo;
     SDL_Color blanco;
@@ -24,9 +16,9 @@ typedef struct {
     SDL_Color hover;
 } PlaylistColors;
 
-// Estructura principal
+// Estructura principal de la playlist
 typedef struct {
-    // Recursos
+    // Recursos gráficos
     SDL_Texture* background;
     SDL_Texture* albumCover;
     TTF_Font* fontTitle;
@@ -35,7 +27,7 @@ typedef struct {
     // Datos
     const char* playlistName;
     const char* playlistAuthor;
-    CancionPlaylist* canciones;
+    cancionInfo* canciones;
     int totalCanciones;
     int capacidad;
     
@@ -47,20 +39,11 @@ typedef struct {
     PlaylistColors colors;
 } PlaylistPage;
 
-// Inicialización
+// Funciones principales
 void Playlist_Init(SDL_Renderer* renderer, const char* name, const char* author);
-
-// Agregar canción desde otras páginas
-void Playlist_AgregarCancion(PlaylistPage* page, const char* nombre, const char* artista, 
-                            const char* album, const char* duracion);
-
-// Renderizado
+void Playlist_AgregarCancion(PlaylistPage* page, const cancionInfo* cancion);
 void Playlist_Render(SDL_Renderer* renderer, PlaylistPage* page);
-
-// Eventos
 void Playlist_HandleEvent(SDL_Event* event, bool* running, PlaylistPage* page);
-
-// Limpieza
 void Playlist_Destroy(PlaylistPage* page);
 
 #endif
