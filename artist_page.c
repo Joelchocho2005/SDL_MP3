@@ -11,10 +11,11 @@
 #define WINDOW_HEIGHT 652
 
 typedef enum {
-    
     STATE_ALBUM_PAGE,
     STATE_ALBUM_PAGE_SIGUIENTE,
-    STATE_ARTIST_PAGE
+    STATE_ARTIST_PAGE,
+    STATE_POPULARES_PAGE,
+    STATE_DISCOGRAFIA_PAGE
 } AppState;
 
 typedef struct {
@@ -24,7 +25,6 @@ typedef struct {
 
 typedef struct {
     
-    char mensaje;
     SDL_Color blanco;
     SDL_Color gris; // gris medio
     SDL_Rect rect; // x, y, ancho, alto
@@ -32,17 +32,28 @@ typedef struct {
     SDL_Window* window;
     SDL_Renderer* renderer;
 
-    SDL_Texture* albumpage;
-    SDL_Texture* albumpagesiguiente;
-    SDL_Texture* artistpage;
     SDL_Texture* background;
+    SDL_Texture* albumpage;
+    SDL_Texture* artistpage;
+    SDL_Texture* popularespage;
+    SDL_Texture* discografiapage;
+
 
     Button siguienteButton;
     Button artistaButton;
+    Button popularesButton;
+    Button discografiaButton;
 
     char nombreCancion[20];
     char reproduccionesCancion[10];
     char duracionCancion[10];
+    int cantidad;
+    char nums[20];
+    int posicionesX;
+    int posicionesY;
+    int ancho;
+    int alto;
+    char mensaje[4];  // suficiente para 3 dígitos + '\0'
 
     SDL_Texture* nombreCancionTexture;
     SDL_Texture* nombreArtistaTexture;
@@ -54,6 +65,7 @@ typedef struct {
     bool running;
     AppState currentState;
     TTF_Font* font;
+    TTF_Font* bigfont;
     SDL_Rect cvRect;                    // Área para CVV
     char cvv[4];                         // Almacenar CVV
     bool boolActivo;                    // Para controlar entrada de texto
@@ -105,6 +117,12 @@ bool initSDL(App* app) {
         // Continuamos sin fuente, pero el mensaje se mostrará sin texto
     }
 
+    app->bigfont = TTF_OpenFont("src/assets/Inder-Regular.ttf", 60);
+    if (!app->bigfont) {
+        printf("No se pudo cargar la fuente: %s\n", TTF_GetError());
+        // Continuamos sin fuente, pero el mensaje se mostrará sin texto
+    }
+
     return true;
 }
 
@@ -114,6 +132,19 @@ void updateTextTexture(App* app, SDL_Texture** texture, const char* text) {
     if (app->font && text) {
         SDL_Color white = {255, 255, 255, 255};
         SDL_Surface* surface = TTF_RenderText_Blended(app->font, text, white);
+        if (surface) {
+            *texture = SDL_CreateTextureFromSurface(app->renderer, surface);
+            SDL_FreeSurface(surface);
+        }
+    }
+}
+
+void updateTextTextureBig(App* app, SDL_Texture** texture, const char* text) {
+    if (*texture) SDL_DestroyTexture(*texture);
+    
+    if (app->bigfont && text) {
+        SDL_Color white = {255, 255, 255, 255};
+        SDL_Surface* surface = TTF_RenderText_Blended(app->bigfont, text, white);
         if (surface) {
             *texture = SDL_CreateTextureFromSurface(app->renderer, surface);
             SDL_FreeSurface(surface);
@@ -154,8 +185,9 @@ SDL_Texture* loadTexture(App* app, const char* path) {
 bool loadMedia(App* app) {
     // Cargar texturas
     app->albumpage = loadTexture(app, "imgs/Album Main Page.png");
-    app->albumpagesiguiente = loadTexture(app, "imgs/Album Main Page Siguiente.png");
     app->artistpage = loadTexture(app, "imgs/Artist Main Page.png");
+    app->popularespage = loadTexture(app, "imgs/Populares Page.png");
+    app->discografiapage = loadTexture(app, "imgs/Discografia Page.png");
 
     app->isPlaying = false;
     return true;
@@ -167,6 +199,8 @@ void setupButtonsForState(App* app) {
     memset(&app->backButtonRect, 0, sizeof(SDL_Rect));
     memset(&app->siguienteButton.rect, 0, sizeof(SDL_Rect));
     memset(&app->artistaButton, 0, sizeof(SDL_Rect));
+    memset(&app->popularesButton, 0, sizeof(SDL_Rect));
+    memset(&app->discografiaButton, 0, sizeof(SDL_Rect));
     
     switch (app->currentState) {
         
@@ -178,11 +212,20 @@ void setupButtonsForState(App* app) {
 
         case STATE_ALBUM_PAGE_SIGUIENTE:
             app->backButtonRect = (SDL_Rect){30, 10, 40, 40};
+            app->artistaButton.rect = (SDL_Rect){310, 140, 100, 30};
             break;
 
         case STATE_ARTIST_PAGE:
             app->backButtonRect = (SDL_Rect){30, 10, 40, 40};
+            app->popularesButton.rect = (SDL_Rect){128, 310, 100, 20};
+            app->discografiaButton.rect = (SDL_Rect){128, 470, 100, 20};
             break;
+
+        case STATE_POPULARES_PAGE:
+            app->backButtonRect = (SDL_Rect){30, 10, 40, 40};
+
+        case STATE_DISCOGRAFIA_PAGE:
+            app->backButtonRect = (SDL_Rect){30, 10, 40, 40};
     }
 }
 
@@ -197,9 +240,9 @@ void render(App* app) {
                 SDL_RenderCopy(app->renderer, app->albumpage, NULL, NULL);
             }
             
-            updateTextTexture(app, &app->nombreAlbumTexture, "YHLQMDLG");
+            updateTextTextureBig(app, &app->nombreAlbumTexture, "YHLQMDLG");
             if (app->nombreAlbumTexture) {
-                SDL_Rect textRect = {322, 92, 0, 0}; // Ajusta la posición
+                SDL_Rect textRect = {320, 70, 0, 0}; // Ajusta la posición
                 SDL_QueryTexture(app->nombreAlbumTexture, NULL, NULL, &textRect.w, &textRect.h);
                 SDL_RenderCopy(app->renderer, app->nombreAlbumTexture, NULL, &textRect);
             }
@@ -211,16 +254,27 @@ void render(App* app) {
                 SDL_RenderCopy(app->renderer, app->nombreArtistaTexture, NULL, &textRect);
             }
 
-            int cantidad = 5;
-            int posicionesX = 35;
-            int posicionesY;
-            int ancho = 960;
-            int alto = 42;
+            app->cantidad = 5;
+            for(int i = 0; i<20; i++) {
+                app->nums[i] = i+1;
+            }
+            app->posicionesX = 35;
+            app->ancho = 960;
+            app->alto = 42;
 
-            for (int i = 0; i < cantidad; i++) {
-                posicionesY = 330 + i*50;
+            for (int i = 0; i < app->cantidad; i++) {
+                app->posicionesY = 330 + i*50;
 
-                renderizarRectangulos(app->renderer, cantidad, posicionesX, posicionesY, ancho, alto);
+                renderizarRectangulos(app->renderer, app->cantidad, app->posicionesX, app->posicionesY, app->ancho, app->alto);
+
+                sprintf(app->mensaje, "%d", app->nums[i]);  // convierte número a string, ej: "1"
+
+                updateTextTexture(app, &app->nombreCancionTexture, app->mensaje);
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {60, 342 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
 
                 updateTextTexture(app, &app->nombreCancionTexture, "Yo Perreo Sola");
                 if (app->nombreCancionTexture) {
@@ -246,8 +300,66 @@ void render(App* app) {
             break;
             
         case STATE_ALBUM_PAGE_SIGUIENTE:
-            if (app->albumpagesiguiente) {
-                SDL_RenderCopy(app->renderer, app->albumpagesiguiente, NULL, NULL);
+            if (app->albumpage) {
+                SDL_RenderCopy(app->renderer, app->albumpage, NULL, NULL);
+            }
+             
+            updateTextTextureBig(app, &app->nombreAlbumTexture, "YHLQMDLG");
+            if (app->nombreAlbumTexture) {
+                SDL_Rect textRect = {320, 70, 0, 0}; // Ajusta la posición
+                SDL_QueryTexture(app->nombreAlbumTexture, NULL, NULL, &textRect.w, &textRect.h);
+                SDL_RenderCopy(app->renderer, app->nombreAlbumTexture, NULL, &textRect);
+            }
+
+            updateTextTexture(app, &app->nombreArtistaTexture, "Bad Bunny");
+            if (app->nombreArtistaTexture) {
+                SDL_Rect textRect = {322, 144, 0, 0}; // Ajusta la posición
+                SDL_QueryTexture(app->nombreArtistaTexture, NULL, NULL, &textRect.w, &textRect.h);
+                SDL_RenderCopy(app->renderer, app->nombreArtistaTexture, NULL, &textRect);
+            }
+
+            app->cantidad = 3;
+            for(int i = 0; i<20; i++) {
+                app->nums[i] = i+1;
+            }
+            app->posicionesX = 35;
+            app->ancho = 960;
+            app->alto = 42;
+
+            for (int i = 0; i < app->cantidad; i++) {
+                app->posicionesY = 330 + i*50;
+
+                renderizarRectangulos(app->renderer, app->cantidad, app->posicionesX, app->posicionesY, app->ancho, app->alto);
+
+                sprintf(app->mensaje, "%d", app->nums[i]);  // convierte número a string, ej: "1"
+
+                updateTextTexture(app, &app->nombreCancionTexture, app->mensaje);
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {60, 342 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "Yo Perreo Sola");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {129, 342 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "#########");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {440, 342 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "#########");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {800, 342 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
             }
             break;
 
@@ -256,9 +368,9 @@ void render(App* app) {
                 SDL_RenderCopy(app->renderer, app->artistpage, NULL, NULL);
             }
 
-            updateTextTexture(app, &app->nombreArtistaTexture, "Bad Bunny");
+            updateTextTextureBig(app, &app->nombreArtistaTexture, "Bad Bunny");
             if (app->nombreArtistaTexture) {
-                SDL_Rect textRect = {322, 92, 0, 0}; // Ajusta la posición
+                SDL_Rect textRect = {320, 70, 0, 0}; // Ajusta la posición
                 SDL_QueryTexture(app->nombreArtistaTexture, NULL, NULL, &textRect.w, &textRect.h);
                 SDL_RenderCopy(app->renderer, app->nombreArtistaTexture, NULL, &textRect);
             }
@@ -270,16 +382,15 @@ void render(App* app) {
                 SDL_RenderCopy(app->renderer, app->nombreArtistaTexture, NULL, &textRect);
             }
 
-            cantidad = 2;
-            posicionesX = 35;
-            posicionesY;
-            ancho = 960;
-            alto = 42;
+            app->cantidad = 2;
+            app->posicionesX = 35;
+            app->ancho = 960;
+            app->alto = 42;
 
-            for (int i = 0; i < cantidad; i++) {
-                posicionesY = 350 + i*50;
+            for (int i = 0; i < app->cantidad; i++) {
+                app->posicionesY = 350 + i*50;
 
-                renderizarRectangulos(app->renderer, cantidad, posicionesX, posicionesY, ancho, alto);
+                renderizarRectangulos(app->renderer, app->cantidad, app->posicionesX, app->posicionesY, app->ancho, app->alto);
 
                 updateTextTexture(app, &app->nombreCancionTexture, "Cancion #");
                 if (app->nombreCancionTexture) {
@@ -303,10 +414,10 @@ void render(App* app) {
                 }
             }
 
-            for (int i = 0; i < cantidad; i++) {
-                posicionesY = 510 + i*50;
+            for (int i = 0; i < app->cantidad; i++) {
+                app->posicionesY = 510 + i*50;
 
-                renderizarRectangulos(app->renderer, cantidad, posicionesX, posicionesY, ancho, alto);
+                renderizarRectangulos(app->renderer, app->cantidad, app->posicionesX, app->posicionesY, app->ancho, app->alto);
 
                 updateTextTexture(app, &app->nombreCancionTexture, "Album #");
                 if (app->nombreCancionTexture) {
@@ -329,7 +440,106 @@ void render(App* app) {
                     SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
                 }
             }
+            break;
+        case STATE_POPULARES_PAGE:
+            if (app->popularespage) {
+                SDL_RenderCopy(app->renderer, app->popularespage, NULL, NULL);
+            }
 
+            app->cantidad = 8;
+            for(int i = 0; i<20; i++) {
+                app->nums[i] = i+1;
+            }
+            app->posicionesX = 35;
+            app->ancho = 960;
+            app->alto = 42;
+
+            for (int i = 0; i < app->cantidad; i++) {
+                app->posicionesY = 213 + i*50;
+
+                renderizarRectangulos(app->renderer, app->cantidad, app->posicionesX, app->posicionesY, app->ancho, app->alto);
+
+                sprintf(app->mensaje, "%d", app->nums[i]);  // convierte número a string, ej: "1"
+
+                updateTextTexture(app, &app->nombreCancionTexture, app->mensaje);
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {62, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "Cancion #");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {128, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "#########");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {435, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "#########");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {800, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+            }
+
+            break;
+        
+        case STATE_DISCOGRAFIA_PAGE:
+            if (app->discografiapage) {
+                SDL_RenderCopy(app->renderer, app->discografiapage, NULL, NULL);
+            }
+
+            app->cantidad = 8;
+            for(int i = 0; i<20; i++) {
+                app->nums[i] = i+1;
+            }
+            app->posicionesX = 35;
+            app->ancho = 960;
+            app->alto = 42;
+
+            for (int i = 0; i < app->cantidad; i++) {
+                app->posicionesY = 213 + i*50;
+
+                renderizarRectangulos(app->renderer, app->cantidad, app->posicionesX, app->posicionesY, app->ancho, app->alto);
+
+                sprintf(app->mensaje, "%d", app->nums[i]);  // convierte número a string, ej: "1"
+
+                updateTextTexture(app, &app->nombreCancionTexture, app->mensaje);
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {62, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "Cancion #");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {128, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "#########");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {435, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+
+                updateTextTexture(app, &app->nombreCancionTexture, "#########");
+                if (app->nombreCancionTexture) {
+                    SDL_Rect textRect = {800, 225 + i*50, 0, 0}; // Ajusta la posición
+                    SDL_QueryTexture(app->nombreCancionTexture, NULL, NULL, &textRect.w, &textRect.h);
+                    SDL_RenderCopy(app->renderer, app->nombreCancionTexture, NULL, &textRect);
+                }
+            }
             break;
     }
 
@@ -351,7 +561,7 @@ void handleEvents(App* app) {
                 case STATE_ALBUM_PAGE:
                     if (SDL_PointInRect(&p, &app->siguienteButton.rect)) {
                         printf("Botón presionado: Siguiente\n");
-                        app->currentState = STATE_ARTIST_PAGE;  // Ir a pantalla premium
+                        app->currentState = STATE_ALBUM_PAGE_SIGUIENTE;  // Ir a pantalla premium
                         setupButtonsForState(app);  // Actualizar botones
                     }
                     if (SDL_PointInRect(&p, &app->artistaButton.rect)) {
@@ -372,6 +582,11 @@ void handleEvents(App* app) {
                         app->currentState = STATE_ALBUM_PAGE;
                         setupButtonsForState(app);
                     }
+                    if (SDL_PointInRect(&p, &app->artistaButton.rect)) {
+                        printf("Botón presionado: Artista\n");
+                        app->currentState = STATE_ARTIST_PAGE;  // Ir a pantalla premium
+                        setupButtonsForState(app);  // Actualizar botones
+                    }
                     break;
 
                 case STATE_ARTIST_PAGE:
@@ -380,7 +595,34 @@ void handleEvents(App* app) {
                         app->currentState = STATE_ALBUM_PAGE;
                         setupButtonsForState(app);
                     }
+                    if (SDL_PointInRect(&p, &app->popularesButton.rect)) {
+                        printf("Botón presionado: Populares\n");
+                        app->currentState = STATE_POPULARES_PAGE;  // Ir a pantalla premium
+                        setupButtonsForState(app);  // Actualizar botones
+                    }
+                    if (SDL_PointInRect(&p, &app->discografiaButton.rect)) {
+                        printf("Botón presionado: Discografia\n");
+                        app->currentState = STATE_DISCOGRAFIA_PAGE;  // Ir a pantalla premium
+                        setupButtonsForState(app);  // Actualizar botones
+                    }
                     break;
+
+                case STATE_POPULARES_PAGE:
+                    if (app->backButtonRect.w > 0 && SDL_PointInRect(&p, &app->backButtonRect)) {
+                        printf("Botón presionado: Retroceso\n");
+                        app->currentState = STATE_ARTIST_PAGE;
+                        setupButtonsForState(app);
+                    }
+                    break;
+
+                case STATE_DISCOGRAFIA_PAGE:
+                    if (app->backButtonRect.w > 0 && SDL_PointInRect(&p, &app->backButtonRect)) {
+                        printf("Botón presionado: Retroceso\n");
+                        app->currentState = STATE_ARTIST_PAGE;
+                        setupButtonsForState(app);
+                    }
+                    break;
+
             }
         }
     }
